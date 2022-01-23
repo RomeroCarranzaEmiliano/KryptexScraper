@@ -5,6 +5,8 @@
 from bs4 import BeautifulSoup
 import requests
 import pickle
+import re
+import time
 
 print("[START]")
 
@@ -14,11 +16,12 @@ class Row():
 		self.price = row[1]
 		self.ETH = row[2]
 		self.ETC = row[3]
-		self.UBQ = row[4]
-		self.RVN = row[5]
-		self.BEAM = row[6]
-		self.monthly_winning = row[7]
-		self.days = row[8]
+		self.EXP = row[4]
+		self.UBQ = row[5]
+		self.RVN = row[6]
+		self.BEAM = row[7]
+		self.monthly_winning = row[8]
+		self.days = row[10]
 
 
 def getDocument(url):
@@ -29,6 +32,8 @@ def getDocument(url):
 
 
 def getParsedRow(row):
+	"""
+	"""
 	row = row.replace("Mh/s","").replace("H/s","").replace("días","")
 	row = row.split()
 
@@ -40,6 +45,11 @@ def getParsedRow(row):
 		elif counter != 0:
 			row[0] = row[0] + " " + element
 		counter += 1
+
+	for i in range(len(row)):
+		row[i] = row[i].replace("$","")
+
+	print(row)
 
 	return(row)
 
@@ -63,22 +73,25 @@ def scrap(document):
 	new_table = []
 	for row in rows:
 		parsed_row = getParsedRow(str(row.get_text()))
-		print(parsed_row)
 		row = Row(parsed_row)
+		print(row.model, row.monthly_winning)
 		new_table.append(row)
 
 	return new_table
 
 
 def dumpData(table):
+	"""
+	"""
 	filename = "gpu_table.data"
 	file = open(filename, "wb")
-	for element in table:
-		pickle.dump(element, file)
+	pickle.dump(table, file)
 	file.close()
 
 
 def main():
+	"""
+	"""
 	url = "https://www.kryptex.org/es/best-gpus-for-mining"
 	document = getDocument(url)
 	table = scrap(document)
