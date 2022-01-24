@@ -7,6 +7,9 @@ import requests
 import pickle
 import re
 import time
+import sys
+import webbrowser
+import random
 
 print("[START]")
 
@@ -22,6 +25,7 @@ class Row():
 		self.BEAM = row[7]
 		self.monthly_winning = row[8]
 		self.days = row[10]
+		self.power_consumption = None
 
 
 def getDocument(url):
@@ -54,6 +58,38 @@ def getParsedRow(row):
 	return(row)
 
 
+def scrapPowerConsumption(model):
+	"""
+	"""
+	model = model.lower().replace(" ", "-")
+	base_url = "https://www.kryptex.org/en/hardware/"
+	url = base_url+model
+
+	sleep_times = [0, 0.1, 0.25, 0.5, 0.75, 1, 2, 3, 6, 6.5, 7, 7.5, 8]
+	rnd = random.randint(0, 12)
+	sleep = sleep_times[rnd]
+	print("waiting", sleep, "seconds...")
+	time.sleep(sleep)
+
+	counter = 0
+	while True:
+		try:
+			document = getDocument(url)
+
+			soup = BeautifulSoup(document, "html.parser")
+			content = soup.get_text()
+			power_consumption = re.search(r"\d+[,.]\d+W[\.$]", content)[0].replace("W.","")
+			break;
+		except:
+			print("[Warning] Request rejected, trying again...")
+			sleep += 1 + 3*counter
+			counter += 1
+			print("waiting", sleep, "seconds...")
+			time.sleep(sleep)
+
+	return power_consumption
+
+
 def scrap(document):
 	"""
 		Scrap the website and get the table as an array of dicts
@@ -74,7 +110,9 @@ def scrap(document):
 	for row in rows:
 		parsed_row = getParsedRow(str(row.get_text()))
 		row = Row(parsed_row)
-		print(row.model, row.monthly_winning)
+		power_consumption = scrapPowerConsumption(row.model)
+		row.power_consumption = power_consumption
+		print(row.model, row.monthly_winning, row.power_consumption)
 		new_table.append(row)
 
 	return new_table
