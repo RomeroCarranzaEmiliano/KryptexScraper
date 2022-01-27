@@ -4,6 +4,7 @@
 
 import pickle
 from pulp import *
+import matplotlib.pyplot as plt
 
 class Row():
 	def __init__(self, row):
@@ -38,7 +39,36 @@ def trimData(data, budget):
 	return trimed_data
 
 
-def problemDefinition(data, budget, gpu_quantity, power):
+def getPowerBill(power_consumption):
+	"""
+	"""
+	power_billing = {
+		"[0, 120]": [81.1406, 5,35605, 0],
+		"[120, 500]": [112.68, 6.51891, 8.45600],
+		"[500, 700]": [163.7425, 7.70296,  9,71500],
+		"[700, None]": [163.7425, 8.65052, 10.92850]
+	}
+	bill = 0
+	consumption_range = [0, 0]
+	if power_consumption < 700:
+		if power_consumption < 500:
+			if power_consumption < 120:
+				consumption_range = [0, 120]
+			else:
+				consumption_range = [120, 500]
+		else:
+			consumption_range = [500, 700]
+	else:
+		consumption_range = [700, None]
+
+	bill = power_billing[str(consumption_range)][0]
+	bill += power_billing[str(consumption_range)][1]*120
+	bill += power_billing[str(consumption_range)][2]*(power_consumption-120)
+
+	return bill
+
+
+def problemDefinition(data, budget, gpu_quantity, power, category):
 	"""
 		max Z = GPU1*RETURN1 + GPU2*RETURN2 + ... GPU_N*RETURN_N
 		S.A.
@@ -46,6 +76,19 @@ def problemDefinition(data, budget, gpu_quantity, power):
 			GPU1*PRICE1 + GPU2*PRICE2 + ... + GPU_N*PRICE_N <= initial investment available
 			GPU1, GPU2, ... , GPU_N Binary Integers
 	"""
+	category_list = ["l120", "l500", "l700", "l+"]
+	category_top = {
+		"l120": 120,
+		"l500": 500,
+		"l700": 700,
+		"l+": 10000000
+	}
+	category_cost = {
+		"l120": [81.1406, 5.35605, 0],
+		"l500": [112.68, 6.51891, 8.45600],
+		"l700": [163.7425, 7.70296,  9.71500],
+		"l+": [163.7425, 8.65052, 10.92850]
+	}
 	gpus_list = []
 	gpus_winnings = {}
 	gpus_prices = {}
@@ -60,41 +103,106 @@ def problemDefinition(data, budget, gpu_quantity, power):
 
 	prob = LpProblem("GPU_Optimal_Array_for_mining", LpMaximize)
 	gpus_chosen = LpVariable.dicts("Chosen", gpus_list, 0, 1, cat='Integer')
+	first_120 = LpVariable("First_120")
+	rest_120 = LpVariable("Rest_120")
+	rest = LpVariable("Rest")
+	total_cost = LpVariable("Total_cost")
+	total_earning = LpVariable("Total_earning")
+	usd = 221
 
 	# Objective function
-	prob += lpSum([gpus_chosen[i]*gpus_winnings[i] - gpus_chosen[i]*gpus_power[i]*(24/1000)*power for i in gpus_list])
+	prob += total_earning - total_cost
+
+	# First 120 kWh restriction
+	prob += first_120 + rest_120 == 120, "First120Restriction"
+	prob += first_120 >= 0
+
+	# Rest kWh restriction
+	prob += rest + rest_120 == rest, "RestRestriction"
+	prob += first_120 + rest <= category_top[category_list[category]], "TopRestriction"
+
+	# Lower limit restriction
+	prob += lpSum([gpus_chosen[i]*gpus_power[i]*24*30/1000 for i in gpus_list]) == first_120 + rest, "LowerLimitRestriction"
+
+	# Power cost restrictions
+	prob += category_cost[category_list[category]] + first_120*category_cost[category_list[category]][1] == total_cost, "PowerCostRestriction"
+
+	# Earnings restriction
+	prob += lpSum([gpus_chosen[i]*gpus_winnings[i] for i in gpus_list])*usd*30 == total_earning, "TotalEarnings"
 
 	# Budget restriction
 	prob += lpSum([gpus_chosen[i]*gpus_prices[i] for i in gpus_list]) <= float(budget), "BudgetMaximum"
 	# GPU quantity restriction
 	prob += lpSum([gpus_chosen[i] for i in gpus_list]) <= int(gpu_quantity), "GpuMaximum"
 
-	print(gpus_power)
-
 	total_power_consumption = 0
+	result = {
+		"Category": category_list[category],
+		"Total earning": 0,
+		"Total cost": 0,
+		"Benefits": 0,
+		"Total power consumption": 0,
+		"Vars": []
+	}
 	prob.solve()
 	print("Status: ", LpStatus[prob.status])
+	print("-"*80)
 	for v in prob.variables():
 		if v.varValue > 0:
-			print(v.name, "=", v.varValue)
-			model = v.name.replace("Chosen_", "")
-			total_power_consumption += gpus_power[model]
+			var = v.name+"="+str(v.varValue)
+			result["Vars"].append(var)
+			if v.name[0:7] == "Chosen_":
+				model = v.name.replace("Chosen_", "")
+				total_power_consumption += gpus_power[model]
+			if v.name == "Total_cost":
+				result["Total cost"] = float(v.varValue)
+			if v.name == "Total_earning":
+				result["Total earning"] = float(v.varValue)
 
-	print("Total power consumption:", total_power_consumption)
+	result["Total power consumption"] = total_power_consumption
+	result["Benefits"] = result["Total earning"] - result["Total cost"]
 
-	return "OK"
+	return result
 
 
 def main():
 	budget = input("Budget(USD): ")
-	gpu_quantity = input("GPU quantity: ")
-	power = input("kWh cost: ")
-	power = float(power)
+	max_gpu_quantity = input("Max GPU quantity: ")
+	#power = input("kWh cost: ")
+	#power = float(power)
+	power = 0
 
 	data = loadData()
 	data = trimData(data, budget)
 
-	problemDefinition(data, budget, gpu_quantity, power)
+	func = {"l120": [], "l500": [], "l700": [], "l+": []}
+	for k in range(1, int(max_gpu_quantity)+1):
+		gpu_quantity = k
+		results = []
+		for i in range(4):
+			category = i
+			results.append(problemDefinition(data, budget, gpu_quantity, power, category))
+
+		print("="*80)
+		print("Results")
+		print("="*80)
+		print("Budget: ", budget)
+		print("Max GPU quantity: ", gpu_quantity)
+		print("_"*80)
+
+		for i in results:
+			print("Category: ", i["Category"])
+			print("Benefits: ", i["Benefits"])
+			func[i["Category"]].append(float(i["Benefits"]))
+			for j in i["Vars"]:
+				print(j)
+			print("-"*80)
+
+	print(func["l120"])
+	print(func["l500"])
+	print(func["l700"])
+	print(func["l+"])
+	
 
 
 if __name__ == "__main__":
