@@ -94,6 +94,17 @@ def problemDefinition(data, budget, gpu_quantity, power, category):
 	gpus_prices = {}
 	gpus_power = {}
 
+	motherboard_cost_per_gpu = 45
+	cpu_cost = 35
+	memory_cost = 25
+	power_supply_cost = 105
+	other_cost = 48
+
+	fixed_costs = cpu_cost + memory_cost + power_supply_cost + other_cost
+	budget = float(budget) - float(fixed_costs)
+
+	base_power_consumption = 2.5*30
+
 	for element in data:
 		model = element.model.replace("-", "_").replace(" ", "_")
 		gpus_list.append(model)
@@ -108,13 +119,16 @@ def problemDefinition(data, budget, gpu_quantity, power, category):
 	rest = LpVariable("Rest")
 	total_cost = LpVariable("Total_cost")
 	total_earning = LpVariable("Total_earning")
+	gpu_budget = LpVariable("Gpu_budget")
+	used_budget = LpVariable("Used_budget")
+	not_used_budget = LpVariable("Not_used_budget")
 	usd = 221
 
 	# Objective function
 	prob += total_earning - total_cost
 
 	# First 120 kWh restriction
-	prob += first_120 + rest_120 == 120, "First120Restriction"
+	prob += first_120 + rest_120 + base_power_consumption == 120, "First120Restriction"
 	prob += first_120 >= 0
 
 	# Rest kWh restriction
@@ -131,7 +145,10 @@ def problemDefinition(data, budget, gpu_quantity, power, category):
 	prob += lpSum([gpus_chosen[i]*gpus_winnings[i] for i in gpus_list])*usd*30 == total_earning, "TotalEarnings"
 
 	# Budget restriction
-	prob += lpSum([gpus_chosen[i]*gpus_prices[i] for i in gpus_list]) <= float(budget), "BudgetMaximum"
+	prob += lpSum([gpus_chosen[i]*gpus_prices[i] for i in gpus_list]) <= used_budget + not_used_budget, "BudgetMaximum"
+	prob += used_budget + not_used_budget == gpu_budget
+
+	prob += lpSum([gpus_chosen[i]*motherboard_cost_per_gpu for i in gpus_list]) + gpu_budget == float(budget)
 	# GPU quantity restriction
 	prob += lpSum([gpus_chosen[i] for i in gpus_list]) <= int(gpu_quantity), "GpuMaximum"
 
@@ -143,6 +160,8 @@ def problemDefinition(data, budget, gpu_quantity, power, category):
 		"Benefits": 0,
 		"Total power consumption": 0,
 		"Gpu in use": 0,
+		"Used budget": 0,
+		"ROI": 0,
 		"Vars": []
 	}
 	prob.solve()
@@ -160,9 +179,12 @@ def problemDefinition(data, budget, gpu_quantity, power, category):
 				result["Total cost"] = float(v.varValue)
 			if v.name == "Total_earning":
 				result["Total earning"] = float(v.varValue)
+			if v.name == "Not_used_budget":
+				result["Used budget"] = budget - float(v.varValue)
 
 	result["Total power consumption"] = total_power_consumption
-	result["Benefits"] = result["Total earning"] - result["Total cost"]
+	result["Benefits"] = (result["Total earning"] - result["Total cost"])/usd
+	result["ROI"] = (result["Used budget"]/result["Benefits"])/12
 
 	return result
 
@@ -178,6 +200,7 @@ def main():
 	data = trimData(data, budget)
 
 	func = {"l120": [], "l500": [], "l700": [], "l+": []}
+	func2 = {"l120": [], "l500": [], "l700": [], "l+": []}
 	for k in range(1, int(max_gpu_quantity)+1):
 		gpu_quantity = k
 		results = []
@@ -195,20 +218,36 @@ def main():
 		for i in results:
 			print("Category: ", i["Category"])
 			print("Benefits: ", i["Benefits"])
+			print("Total power consumption: ", i["Total power consumption"])
 			func[i["Category"]].append(float(i["Benefits"]))
+			func2[i["Category"]].append(float(i["ROI"]))
 			for j in i["Vars"]:
 				print(j)
 			print("-"*80)
 
-	f1, = plt.plot(func["l120"], label="l120")
-	f2, = plt.plot(func["l500"], label="l500")
-	f3, = plt.plot(func["l700"], label="l700")
-	f4, = plt.plot(func["l+"], label="l+")
+	fig1 = plt.figure()
+	fig2 = plt.figure()
+	ax1 = fig1.add_subplot(111)
+	ax2 = fig2.add_subplot(111)
+
+	f1, = ax1.plot(func["l120"], label="l120")
+	f2, = ax1.plot(func["l500"], label="l500")
+	f3, = ax1.plot(func["l700"], label="l700")
+	f4, = ax1.plot(func["l+"], label="l+")
+
+	ax1.set_xlabel("n of GPU\'s")
+	ax1.set_ylabel("Monthly benefit in USD")
+
+	f21, = ax2.plot(func2["l120"], label="l120")
+	f22, = ax2.plot(func2["l500"], label="l500")
+	f23, = ax2.plot(func2["l700"], label="l700")
+	f24, = ax2.plot(func2["l+"], label="l+")
+
+	ax2.set_xlabel("n of GPU\'s")
+	ax2.set_ylabel("ROI(years)")
 
 	plt.xticks(range(1, int(max_gpu_quantity)+1))
 
-	plt.xlabel("n of GPU\'s")
-	plt.ylabel("Monthly benefit in ARS")
 
 	leg = plt.legend(loc="center")
 	plt.show()
