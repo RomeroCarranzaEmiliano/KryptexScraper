@@ -142,6 +142,7 @@ def problemDefinition(data, budget, gpu_quantity, power, category):
 		"Total cost": 0,
 		"Benefits": 0,
 		"Total power consumption": 0,
+		"Gpu in use": 0,
 		"Vars": []
 	}
 	prob.solve()
@@ -152,6 +153,7 @@ def problemDefinition(data, budget, gpu_quantity, power, category):
 			var = v.name+"="+str(v.varValue)
 			result["Vars"].append(var)
 			if v.name[0:7] == "Chosen_":
+				result["Gpu in use"] += 1
 				model = v.name.replace("Chosen_", "")
 				total_power_consumption += gpus_power[model]
 			if v.name == "Total_cost":
@@ -198,11 +200,19 @@ def main():
 				print(j)
 			print("-"*80)
 
-	print(func["l120"])
-	print(func["l500"])
-	print(func["l700"])
-	print(func["l+"])
-	
+	f1, = plt.plot(func["l120"], label="l120")
+	f2, = plt.plot(func["l500"], label="l500")
+	f3, = plt.plot(func["l700"], label="l700")
+	f4, = plt.plot(func["l+"], label="l+")
+
+	plt.xticks(range(1, int(max_gpu_quantity)+1))
+
+	plt.xlabel("n of GPU\'s")
+	plt.ylabel("Monthly benefit in ARS")
+
+	leg = plt.legend(loc="center")
+	plt.show()
+
 
 
 if __name__ == "__main__":
